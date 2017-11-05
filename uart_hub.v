@@ -34,20 +34,18 @@ module uart_hub (
 	inout pin23,
 	//inout pin24
 );
-	reg [23:0] counter;
-	reg [8:0] strobe_c;
-	reg strobe;
-	always @(posedge pin3_clk_16mhz) counter <= counter + 1;
-	always @(posedge u_clk) begin
+	reg [23:0] counter;//Heartbeat, ignore
+	reg [8:0] strobe_c;//Test fixture to isolate single byte FIXME
+	reg strobe; //Test fixture FIXME
+	always @(posedge pin3_clk_16mhz) counter <= counter + 1; //Heartbeat
+	always @(posedge u_clk) begin //To create a single isolated byte FIXME
 	       strobe_c<=strobe_c+1; 
 	       if(strobe_c[8]) begin
 		      strobe<=1;
 		      strobe_c<=0;
 	      end else strobe<=0;
         end
-	wire [7:0] in_bus;
-	wire clk;
-	wire u_clk;
+	wire u_clk;//UART clock, TODO: use dedicated clocking resource
 	/// left side of board
 	assign pin1_usb_dp = 1'b0;
 	assign pin2_usb_dn = 1'b0;
@@ -61,7 +59,6 @@ module uart_hub (
 	//assign pin11 = 1'bz;
 	//assign pin12 = 1'bz;
 	assign pin13 = counter[23];
-	assign clk = counter[23];
 	assign in_bus[7] = pin4;
 	assign in_bus[6] = pin5;  
 	assign in_bus[5] = pin6;  
@@ -83,17 +80,17 @@ module uart_hub (
 	//assign pin23 =     1'bz;
 	//assign pin24 =     1'bz;
 	
-	uart_clock uart_clock(
+	uart_clock uart_clock( //UART Clock Module see above todo
 		.clk(pin3_clk_16mhz),
 		.u_clk(u_clk)
 	);
-	shift_reg man_shift(
-		.clk(u_clk),
-		.new_data(strobe),
-		.rdy(pin21),
-		.char(8'b10110101),
-		.out_bit(pin22),
-		.clk_out(pin23)
+	shift_reg man_shift( //Parallel in, serial out shift register fitted with start and stop bit
+		.clk(u_clk), //TODO: Add rst signal
+		.new_data(strobe), //Strobe is above test fixture
+		.rdy(pin21), //Signals when ready to recieve new byte
+		.char(8'b10110101), //Input signal
+		.out_bit(pin22),  //Serial out
+		.clk_out(pin23) //Test fixture FIXME
 	);
 endmodule
 module shift_reg(
@@ -102,47 +99,47 @@ module shift_reg(
 	input [7:0] char,
 	output rdy,
 	output out_bit,
-	output clk_out
+	output clk_out //Test fixture FIXME
 );
-	reg [9:0] byte;
-	wire [3:0] shift_d,shift_q;
+	reg [9:0] byte; //Byte output
+	wire [3:0] shift_d,shift_q; //Shift counter
 
 	//Assignments
-	assign out_bit=byte[9]|rdy;
+	assign out_bit=byte[9]|rdy; //Output last bit in output
 
 	//Combinatorial Logic
 	always @* begin
-		if(shift_q>=9) begin
-			rdy=1;
-			shift_d=shift_q;
+		if(shift_q>=9) begin //For 9 bytes, only 8 shifts are needed
+			rdy=1; //Finished shifting, ready for more
+			shift_d=shift_q; //Stop counting shifts
 		end else begin
-			rdy=0;
-			shift_d=shift_q+1;
+			rdy=0; //Shifting, not ready
+			shift_d=shift_q+1; //Increment shift flip flop on next clk
 		end
 	end
 
 	//Sequential Logic
 	always @(posedge clk) begin
-		clk_out<=~clk_out;
-		shift_q<=shift_d;
-		if(new_data&rdy) begin
+		clk_out<=~clk_out; //Test fixture FIXME
+		shift_q<=shift_d; //FF clock
+		if(new_data&rdy) begin //If there is new data and the device is ready, bring it in
 			byte <= (char<<1)+1'b1; //Shift right to add 1 stop bit
-			shift_q<=0;
+			shift_q<=0; //Reset shift counter (was left at 9)
 		end else begin
-		       	byte<=byte<<1;
+		       	byte<=byte<<1; //Shift 1 bit
 		end
 		
 	end
 endmodule
 module uart_clock #(
-	parameter CLOCK_FREQ=16000000,
-	parameter BAUD=9600
+	parameter CLOCK_FREQ=16000000, //Your FPGAs clock freq B2 boards = 16MHz
+	parameter BAUD=9600 //Default baudrate
 )(
-	input clk,
-	output u_clk
+	input clk, //System clock
+	output u_clk //Pulses one per bit
 );
-	localparam div=CLOCK_FREQ/BAUD/2;
-	reg [14:0] counter;
+	localparam div=CLOCK_FREQ/BAUD/2; //Divider constant, Need to flip twice per bit
+	reg [14:0] counter; //Clock divider
 
 	//Combinatorial Logic
 	always @(*) begin
@@ -152,7 +149,7 @@ module uart_clock #(
 		counter<=counter+1;
 		if(counter>=div) begin
 			counter<=0;
-			u_clk<=~u_clk;
+			u_clk<=~u_clk; //Flip the clock
 		end
 	end
 endmodule
