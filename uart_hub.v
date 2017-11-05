@@ -31,7 +31,7 @@ module uart_hub (
 	//inout pin20,
 	inout pin21,
 	inout pin22,
-	inout pin23,
+	//inout pin23,
 	//inout pin24
 );
 	reg [23:0] counter;//Heartbeat, ignore
@@ -84,32 +84,36 @@ module uart_hub (
 		.clk(pin3_clk_16mhz),
 		.u_clk(u_clk)
 	);
-	shift_reg man_shift( //Parallel in, serial out shift register fitted with start and stop bit
+	piso_shift_reg_lsb uart_shift( //Parallel in, serial out shift register fitted with start and stop bit
 		.clk(u_clk), //TODO: Add rst signal
 		.new_data(strobe), //Strobe is above test fixture
 		.rdy(pin21), //Signals when ready to recieve new byte
 		.char(8'b10110101), //Input signal
 		.out_bit(pin22),  //Serial out
-		.clk_out(pin23) //Test fixture FIXME
 	);
 endmodule
-module shift_reg(
+module piso_shift_reg_lsb #(
+	parameter START_BITS=1,
+	parameter STOP_BITS=1,
+	parameter PARITY=0,
+	parameter WIDTH=8
+)(
 	input clk,
 	input new_data,
-	input [7:0] char,
+	input [WIDTH-1:0] char,
 	output rdy,
-	output out_bit,
-	output clk_out //Test fixture FIXME
+	output out_bit
 );
-	reg [9:0] byte; //Byte output
+	localparam SIZE=WIDTH+START_BITS+STOP_BITS;
+	reg [SIZE-1:0] byte; //Byte output
 	wire [3:0] shift_d,shift_q; //Shift counter
 
 	//Assignments
-	assign out_bit=byte[9]|rdy; //Output last bit in output
+	assign out_bit=byte[0]|rdy; //LSB bit last, leave line high when idle
 
 	//Combinatorial Logic
 	always @* begin
-		if(shift_q>=9) begin //For 9 bytes, only 8 shifts are needed
+		if(shift_q>=(SIZE-1)) begin //For 10 bits, only 9 shifts are needed
 			rdy=1; //Finished shifting, ready for more
 			shift_d=shift_q; //Stop counting shifts
 		end else begin
@@ -120,13 +124,12 @@ module shift_reg(
 
 	//Sequential Logic
 	always @(posedge clk) begin
-		clk_out<=~clk_out; //Test fixture FIXME
 		shift_q<=shift_d; //FF clock
 		if(new_data&rdy) begin //If there is new data and the device is ready, bring it in
-			byte <= (char<<1)+1'b1; //Shift right to add 1 stop bit
-			shift_q<=0; //Reset shift counter (was left at 9)
+			byte <= {{START_BITS{1'b0}},char,{STOP_BITS{1'b1}}}; //Concatenate to add start, stop bits
+			shift_q<=0; //Reset shift counter (was left at max)
 		end else begin
-		       	byte<=byte<<1; //Shift 1 bit
+		       	byte<=byte>>1; //Shift 1 bit
 		end
 		
 	end
