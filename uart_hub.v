@@ -88,7 +88,7 @@ module uart_hub (
 		.clk(u_clk), //TODO: Add rst signal
 		.new_data(strobe), //Strobe is above test fixture
 		.rdy(pin21), //Signals when ready to recieve new byte
-		.char(8'b10110101), //Input signal
+		.char(8'b01010101), //Input signal
 		.out_bit(pin22),  //Serial out
 	);
 endmodule
@@ -106,7 +106,7 @@ module piso_shift_reg_lsb #(
 );
 	localparam SIZE=WIDTH+START_BITS+STOP_BITS;
 	reg [SIZE-1:0] byte; //Byte output
-	wire [3:0] shift_d,shift_q; //Shift counter
+	wire [4:0] shift_d,shift_q; //Shift counter
 
 	//Assignments
 	assign out_bit=byte[0]|rdy; //LSB bit last, leave line high when idle
@@ -126,7 +126,7 @@ module piso_shift_reg_lsb #(
 	always @(posedge clk) begin
 		shift_q<=shift_d; //FF clock
 		if(new_data&rdy) begin //If there is new data and the device is ready, bring it in
-			byte <= {{START_BITS{1'b0}},char,{STOP_BITS{1'b1}}}; //Concatenate to add start, stop bits
+			byte <= {{STOP_BITS{1'b1}},char,{START_BITS{1'b0}}}; //Concatenate to add start, stop bits
 			shift_q<=0; //Reset shift counter (was left at max)
 		end else begin
 		       	byte<=byte>>1; //Shift 1 bit
