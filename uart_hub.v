@@ -30,88 +30,73 @@ module uart_hub (
 	output pin1_usb_dp,
 	output pin2_usb_dn,
 	input pin3_clk_16mhz,
-	/*inout pin4,
-	inout pin5,
-	inout pin6,
-	inout pin7,
-	inout pin8,
-	inout pin9,
-	inout pin10,
-	inout pin11,
-	inout pin12,*/
 	output pin13,
 	//inout pin14_sdo,
 	//inout pin15_sdi,
 	//inout pin16_sck,
 	//inout pin17_ss,
-	//inout pin18,
-	//inout pin19,
-	//inout pin20,
-	//inout pin21,
-	inout pin22,
-	//inout pin23,
-	//inout pin24
+	inout pin22
 );
 	reg [23:0] counter;//Heartbeat, ignore
-	reg [8:0] strobe_c;//Test fixture to isolate single byte FIXME
-	reg strobe; //Test fixture FIXME
 	always @(posedge pin3_clk_16mhz) counter <= counter + 1; //Heartbeat
-	always @(posedge u_clk) begin //To create a single isolated byte FIXME
-	       strobe_c<=strobe_c+1; 
-	       if(strobe_c[8]) begin
-		      strobe<=1;
-		      strobe_c<=0;
-	      end else strobe<=0;
-        end
-	wire u_clk;//UART clock, TODO: use dedicated clocking resource
-	wire [7:0] data;
-	wire empty;
-	wire full;
-	wire rdy;
-	/// left side of board
+	
 	assign pin1_usb_dp = 1'b0;
 	assign pin2_usb_dn = 1'b0;
-	//assign pin4 = 1'bz;
-	//assign pin5 = 1'bz;
-	//assign pin6 = 1'bz;
-	//assign pin7 = 1'bz;
-	//assign pin8 = 1'bz;
-	//assign pin9 = 1'bz;
-	//assign pin10 = 1'bz;
-	//assign pin11 = 1'bz;
-	//assign pin12 = 1'bz;
 	assign pin13 = counter[23];
-	/// right side of board
-	//assign pin14_sdo = 1'bz;
-	//assign pin15_sdi = 1'bz;
-	//assign pin16_sck = 1'bz;
-	//assign pin17_ss =  1'bz;
-	//assign pin18 =     1'bz;
-	//assign pin19 =     1'bz;
-	//assign pin20 =     1'bz;
-	//assign pin21 =     1'bz;
-	//assign pin22 =     1'bz;
-	//assign pin23 =     1'bz;
-	//assign pin24 =     1'bz;
+	
+	reg [3:0] data;
+	wire full;
+	wire data_strobe;
+	reg [8:0] msg[14:0];
+	initial begin
+	       msg[0]="H";msg[1]="e";msg[2]="l";msg[3]="l";msg[4]="o";msg[5]=" ";msg[6]="W";msg[7]="o";
+	       msg[8]="r";msg[9]="l";msg[10]="d";msg[11]="!";msg[12]=8'h0D;msg[13]=8'h0A;msg[14]=8'h00;
+	end
+	always @(posedge pin3_clk_16mhz) begin
+		if(~full&~data_strobe) begin
+			if(data<14) data<=data+1;
+			else data<=0;
+			data_strobe<=1;
+		end else data_strobe<=0;
+	end
+	uart_tx uart_tx1(
+		.clk(pin3_clk_16mhz),
+		.data_in(msg[data]),
+		.data_strobe(data_strobe),
+		.data_out(pin22),
+		.full(full)
+	);
+
+endmodule
+module uart_tx(
+	input clk,
+	input [7:0] data_in,
+	input data_strobe,
+	output data_out,
+	output full
+);
+	wire [7:0] data;
+	wire rdy;
+	wire empty;
+		
 	fifo_buff fifo_buff(
-		.in_clk(counter[0]),
-		.data_in(counter[8:1]),
+		.in_clk(data_strobe),
+		.data_in(data_in),
 		.out_clk(rdy),
 		.data_out(data),
 		.empty(empty),
 		.full(full)
 	);
 	uart_clock uart_clock( //UART Clock Module see above todo
-		.clk(pin3_clk_16mhz),
+		.clk(clk),
 		.u_clk(u_clk)
 	);
-
 	piso_shift_reg_lsb uart_shift( //Parallel in, serial out shift register fitted with start and stop bit
-		.clk(u_clk), //TODO: Add rst signal
-		.new_data(strobe), //Strobe is above test fixture
-		.rdy(rdy), //Signals when ready to recieve new byte
+		.clk(u_clk),
+		.new_data(~empty), //Strobe is above test fixture
 		.char(data), //Input signal
-		.out_bit(pin22),  //Serial out
+		.rdy(rdy),		
+		.out_bit(data_out)  //Serial out
 	);
 endmodule
 module piso_shift_reg_lsb #(
