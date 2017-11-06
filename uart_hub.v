@@ -8,6 +8,24 @@
 ///
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
+`define CLOG2(x) \
+   (x <= 2) ? 1 : \
+   (x <= 4) ? 2 : \
+   (x <= 8) ? 3 : \
+   (x <= 16) ? 4 : \
+   (x <= 32) ? 5 : \
+   (x <= 64) ? 6 : \
+   (x <= 128) ? 7 : \
+   (x <= 256) ? 8 : \
+   (x <= 512) ? 9 : \
+   (x <= 1024) ? 10 : \
+   (x <= 2048) ? 11 : \
+   (x <= 4096) ? 12 : \
+   (x <= 8192) ? 13 : \
+   (x <= 16384) ? 14 : \
+   (x <= 32768) ? 15 : \
+   (x <= 65536) ? 16 : \
+   -1
 module uart_hub (
 	output pin1_usb_dp,
 	output pin2_usb_dn,
@@ -29,7 +47,7 @@ module uart_hub (
 	//inout pin18,
 	//inout pin19,
 	//inout pin20,
-	inout pin21,
+	//inout pin21,
 	inout pin22,
 	//inout pin23,
 	//inout pin24
@@ -46,6 +64,10 @@ module uart_hub (
 	      end else strobe<=0;
         end
 	wire u_clk;//UART clock, TODO: use dedicated clocking resource
+	wire [7:0] data;
+	wire empty;
+	wire full;
+	wire rdy;
 	/// left side of board
 	assign pin1_usb_dp = 1'b0;
 	assign pin2_usb_dn = 1'b0;
@@ -59,14 +81,6 @@ module uart_hub (
 	//assign pin11 = 1'bz;
 	//assign pin12 = 1'bz;
 	assign pin13 = counter[23];
-	assign in_bus[7] = pin4;
-	assign in_bus[6] = pin5;  
-	assign in_bus[5] = pin6;  
-	assign in_bus[4] = pin7;  
-	assign in_bus[3] = pin8;  
-	assign in_bus[2] = pin9;  
-	assign in_bus[1] = pin10; 
-	assign in_bus[0] = pin11; 
 	/// right side of board
 	//assign pin14_sdo = 1'bz;
 	//assign pin15_sdi = 1'bz;
@@ -79,16 +93,24 @@ module uart_hub (
 	//assign pin22 =     1'bz;
 	//assign pin23 =     1'bz;
 	//assign pin24 =     1'bz;
-	
+	fifo_buff fifo_buff(
+		.in_clk(counter[0]),
+		.data_in(counter[8:1]),
+		.out_clk(rdy),
+		.data_out(data),
+		.empty(empty),
+		.full(full)
+	);
 	uart_clock uart_clock( //UART Clock Module see above todo
 		.clk(pin3_clk_16mhz),
 		.u_clk(u_clk)
 	);
+
 	piso_shift_reg_lsb uart_shift( //Parallel in, serial out shift register fitted with start and stop bit
 		.clk(u_clk), //TODO: Add rst signal
 		.new_data(strobe), //Strobe is above test fixture
-		.rdy(pin21), //Signals when ready to recieve new byte
-		.char(8'b01010101), //Input signal
+		.rdy(rdy), //Signals when ready to recieve new byte
+		.char(data), //Input signal
 		.out_bit(pin22),  //Serial out
 	);
 endmodule
@@ -105,8 +127,9 @@ module piso_shift_reg_lsb #(
 	output out_bit
 );
 	localparam SIZE=WIDTH+START_BITS+STOP_BITS;
+	localparam MAX_COUNT=`CLOG2(SIZE);
 	reg [SIZE-1:0] byte; //Byte output
-	wire [4:0] shift_d,shift_q; //Shift counter
+	wire [MAX_COUNT:0] shift_d,shift_q; //Shift counter
 
 	//Assignments
 	assign out_bit=byte[0]|rdy; //LSB bit last, leave line high when idle
@@ -141,8 +164,10 @@ module uart_clock #(
 	input clk, //System clock
 	output u_clk //Pulses one per bit
 );
-	localparam div=CLOCK_FREQ/BAUD/2; //Divider constant, Need to flip twice per bit
-	reg [14:0] counter; //Clock divider
+	localparam DIV=CLOCK_FREQ/BAUD/2; //Divider constant, Need to flip twice per bit
+	localparam MAX_COUNT=`CLOG2(DIV);
+	reg [MAX_COUNT:0] counter; //Clock divider
+
 
 	//Combinatorial Logic
 	always @(*) begin
@@ -150,9 +175,52 @@ module uart_clock #(
 	//Sequential Logic
 	always @(posedge clk) begin
 		counter<=counter+1;
-		if(counter>=div) begin
+		if(counter>=DIV) begin
 			counter<=0;
 			u_clk<=~u_clk; //Flip the clock
 		end
+	end
+endmodule
+module fifo_buff #(
+	parameter LENGTH=16,
+	parameter WIDTH=8,
+)(
+	input [WIDTH-1:0] data_in,
+	input in_clk,
+	input out_clk,
+	output [WIDTH-1:0] data_out,
+	output full,
+	output empty
+);
+	localparam ADD=1+`CLOG2(LENGTH);
+	
+	//Defines
+	reg [WIDTH-1:0] buffer [LENGTH-1:0];
+	reg [ADD:0] write_addr,read_addr;
+	
+	//Assignments
+	assign data_out=buffer[read_addr[ADD-1:0]];
+	initial begin
+		//full=0;
+		//empty=1;
+	end	
+	//Combinatorial Logic
+	always @(*) begin
+		if(write_addr==read_addr) empty=1;
+		else empty=0;
+		if((write_addr[ADD-1:0]==read_addr[ADD-1:0]) && (write_addr[ADD]!=read_addr[ADD])) full=1;
+		else full=0;	
+	end
+	
+	//Sequential Logic
+	always @(posedge in_clk) begin
+		if(~full) begin
+			buffer[write_addr[ADD-1:0]]<=data_in;
+			write_addr<=write_addr+1;
+		end
+	end
+
+	always @(posedge out_clk) begin
+		if(~empty) read_addr<=read_addr+1;
 	end
 endmodule
