@@ -30,7 +30,7 @@ module uart_hub (
 	output pin1_usb_dp,
 	output pin2_usb_dn,
 	input pin3_clk_16mhz,
-	//output [7:0] d_out,
+	output [7:0] d_out,
 	output pin13,
 	//inout pin14_sdo,
 	//inout pin15_sdi,
@@ -46,23 +46,34 @@ module uart_hub (
 	assign pin1_usb_dp = 1'b0;
 	assign pin2_usb_dn = 1'b0;
 	assign pin13 = counter[23];
-	wire full;
-	wire data_strobe;
+	
+	
+	wire full,empty,rdy;
 	wire rx_new_data;
 	wire [7:0] rx_data;
+	wire [7:0] tx_data;
 	/*reg [8:0] msg[14:0];
 	initial begin
 	       msg[0]<="H";msg[1]<="e";msg[2]<="l";msg[3]<="l";msg[4]<="o";msg[5]<=" ";msg[6]<="W";msg[7]<="o";
 	       msg[8]<="r";msg[9]<="l";msg[10]<="d";msg[11]<="!";msg[12]<=8'h0D;msg[13]<=8'h0A;msg[14]<=8'h00;
 	end*/
-	uart_tx uart_tx1(
+	uart_tx uart_tx1( //Parallel in, serial out shift register fitted with start and stop bit
 		.clk(pin3_clk_16mhz),
+		.new_data(rx_new_data), //Keep transmitting until fifo is empty
+		.char(rx_data), //Input signal
+		.rdy(rdy), //Ready for new data 		
+		.out_bit(pin22),  //Serial out
+		.debug(d_out)
+	);
+/*	fifo_buff fifo_buff(
+		.clk(pin3_clk_16mhz),
+		.in_clk(rx_new_data),
 		.data_in(rx_data),
-		.data_strobe(rx_new_data),
-		.data_out(pin22),
-		.full(full),
-	);	
-
+		.out_clk(rdy),
+		.data_out(tx_data),
+		.empty(empty),
+		.full(full)
+	);*/
 	uart_rx uart_rx1(
 		.clk(pin3_clk_16mhz),
 		.data_in(pin23),
@@ -71,40 +82,9 @@ module uart_hub (
 	);
 
 endmodule
-module uart_tx(
-	input clk,
-	input [7:0] data_in,
-	input data_strobe,
-	output data_out,
-	output full,
-);
-	wire [7:0] data;
-	wire rdy;
-	wire empty;
-	wire u_clk;
-	
-	fifo_buff fifo_buff(
-		.clk(clk),
-		.in_clk(data_strobe),
-		.data_in(data_in),
-		.out_clk(rdy),
-		.data_out(data),
-		.empty(empty),
-		.full(full)
-	);
-	uart_clock uart_clock( //UART Clock Module see above todo
-		.clk(clk),
-		.u_clk(u_clk)
-	);
-	piso_shift_reg_lsb uart_shift( //Parallel in, serial out shift register fitted with start and stop bit
-		.clk(u_clk),
-		.new_data(~empty), //Keep transmitting until fifo is empty
-		.char(data), //Input signal
-		.rdy(rdy), //Ready for new data 		
-		.out_bit(data_out),  //Serial out
-	);
-endmodule
-module piso_shift_reg_lsb #(
+module uart_tx #(
+	parameter CLOCK_FREQ=16000000, //Your FPGAs clock freq B2 boards = 16MHz
+	parameter BAUD=9600, //Default baudrate
 	parameter START_BITS=1,
 	parameter STOP_BITS=1,
 	parameter PARITY=0,
@@ -115,61 +95,77 @@ module piso_shift_reg_lsb #(
 	input [WIDTH-1:0] char,
 	output rdy,
 	output out_bit,
+	output [7:0] debug
 );
 	localparam SIZE=WIDTH+START_BITS+STOP_BITS;
-	localparam MAX_COUNT=`CLOG2(SIZE);
-	reg [SIZE-1:0] byte; //Byte output
-	wire [MAX_COUNT:0] shift_d,shift_q; //Shift counter
-	reg new_data_l;
-
-	//Assignments
-	assign out_bit=byte[0]|rdy; //LSB bit first, leave line high when idle
-	//Combinatorial Logic
-	always @* begin
-		if(shift_q>=(SIZE-1)) begin //For 10 bits, only 9 shifts are needed
-			rdy=1; //Finished shifting, ready for more
-			shift_d=shift_q; //Stop counting shifts
-			new_data_l=(new_data_l|new_data)&rdy;//FIXME This causes a logic loop
-		end else begin
-			rdy=0; //Shifting, not ready
-			shift_d=shift_q+1; //Increment shift flip flop on next clk
-			new_data_l=new_data&rdy; //FIXME this causes a logic loop
-		end
-	end
-
-	//Sequential Logic
-	always @(posedge clk) begin
-		shift_q<=shift_d; //FF clock
-		if(new_data_l) begin //If there is new data and the device is ready, bring it in
-			byte <= {{STOP_BITS{1'b1}},char,{START_BITS{1'b0}}}; //Concatenate to add start, stop bits
-			shift_q<=0; //Reset shift counter (was left at max)
-		end else begin
-		       	byte<=byte>>1; //Shift 1 bit
-		end
-		
-	end
-endmodule
-module uart_clock #(
-	parameter CLOCK_FREQ=16000000, //Your FPGAs clock freq B2 boards = 16MHz
-	parameter BAUD=9600 //Default baudrate
-)(
-	input clk, //System clock
-	output u_clk //Pulses one per bit
-);
-	localparam DIV=CLOCK_FREQ/BAUD/2; //Divider constant, Need to flip twice per bit
-	localparam MAX_COUNT=`CLOG2(DIV);
+	localparam MAX_ADDR=`CLOG2(SIZE)+1;
+	localparam DIV=CLOCK_FREQ/BAUD; //Divider constant, Need to flip twice per bit
+	localparam MAX_COUNT=`CLOG2(DIV)+1;
 	reg [MAX_COUNT:0] counter; //Clock divider
 
 
+	reg [SIZE-1:0] byte_d,byte_q; //Byte output
+	wire [MAX_ADDR:0] shift_d,shift_q; //Shift counter
+	reg rdy_d,rdy_q;
+	reg new_data_q,new_data_d;
+	reg [1:0] state_q,state_d;
+	wire u_clk;
+	
+	localparam READY=2'd0;
+	localparam LOAD=2'd1;
+	localparam SHIFT=2'd2;
+
+	//Assignments
+	assign rdy=rdy_q;
+	assign debug={clk,d,byte_q[0],shift_q[0],state_q,rdy_q,new_data};
 	//Combinatorial Logic
-	always @(*) begin
+	always @* begin
+		out_bit=byte_q[0]|rdy;
+		state_d=state_q;
+		shift_d=shift_q;
+		byte_d=byte_q;
+		rdy_d=rdy_q;
+		case(state_q)
+			READY: begin
+				rdy_d=1;
+				shift_d=0;
+				if(new_data) begin
+					rdy_d=0;
+					state_d=LOAD;
+				end else state_d=READY;
+			end
+			LOAD: begin
+				rdy_d=0;
+				byte_d={{STOP_BITS{1'b1}},char,{START_BITS{1'b0}}};
+				shift_d=0;
+				state_d=SHIFT;
+			end
+			SHIFT: begin
+				shift_d=shift_q+1;
+				byte_d=byte_q>>1;
+				if(shift_q>=SIZE) state_d=READY;
+				else state_d=SHIFT;
+			end
+			default:begin
+				state_d=READY;
+			end
+		endcase
 	end
+
 	//Sequential Logic
 	always @(posedge clk) begin
+		rdy_q<=rdy_d;
+		state_q<=state_d;
 		counter<=counter+1;
+		if(state_q==LOAD) begin
+		       	byte_q<=byte_d;
+			counter<=0;
+		end
 		if(counter>=DIV) begin
 			counter<=0;
-			u_clk<=~u_clk; //Flip the clock
+			byte_q<=byte_d;
+			shift_q<=shift_d;
+			d<=~d;
 		end
 	end
 endmodule
