@@ -30,7 +30,7 @@ module uart_hub (
 	output pin1_usb_dp,
 	output pin2_usb_dn,
 	input pin3_clk_16mhz,
-	//output [7:0] d_out,
+	output [7:0] d_out,
 	output pin13,
 	//inout pin14_sdo,
 	//inout pin15_sdi,
@@ -47,7 +47,7 @@ module uart_hub (
 	assign pin2_usb_dn = 1'b0;
 	assign pin13 = counter[23];
 	
-	
+	wire [7:0] d_out;
 	wire full,empty,rdy;
 	wire rx_new_data;
 	wire [7:0] rx_data;
@@ -62,8 +62,18 @@ module uart_hub (
 		.new_data(rx_new_data), //Keep transmitting until fifo is empty
 		.char(rx_data), //Input signal
 		.rdy(rdy), //Ready for new data 		
-		.out_bit(pin22)  //Serial out
+		.out_bit(pin22),  //Serial out
+		.debug(d_out)
 	);
+/*	fifo_buff fifo_buff(
+		.clk(pin3_clk_16mhz),
+		.in_clk(rx_new_data),
+		.data_in(rx_data),
+		.out_clk(rdy),
+		.data_out(tx_data),
+		.empty(empty),
+		.full(full)
+	);*/
 	uart_rx uart_rx1(
 		.clk(pin3_clk_16mhz),
 		.data_in(pin23),
@@ -84,7 +94,8 @@ module uart_tx #(
 	input new_data,
 	input [WIDTH-1:0] char,
 	output rdy,
-	output out_bit
+	output out_bit,
+	output debug
 );
 	localparam SIZE=WIDTH+START_BITS+STOP_BITS;
 	localparam MAX_ADDR=`CLOG2(SIZE)+1;
@@ -96,19 +107,18 @@ module uart_tx #(
 	reg [SIZE-1:0] byte_d,byte_q; //Byte output
 	reg [MAX_ADDR:0] shift_d,shift_q; //Shift counter
 	reg rdy_d,rdy_q;
-	reg new_data_q,new_data_d;
 	reg [1:0] state_q,state_d;
-	wire u_clk;
-	
+
 	localparam READY=2'd0;
 	localparam LOAD=2'd1;
 	localparam SHIFT=2'd2;
 
 	//Assignments
 	assign rdy=rdy_q;
-	assign out_bit=byte_q[0]|rdy;
+	assign debug=state_q[0]; //FIXME Heisenbug. Don't alter this statement.
 	//Combinatorial Logic
 	always @* begin
+		out_bit=byte_q[0]|rdy;
 		state_d=state_q;
 		shift_d=shift_q;
 		byte_d=byte_q;
@@ -169,22 +179,17 @@ module fifo_buff #(
 	output empty
 );
 	localparam ADD=1+`CLOG2(LENGTH);
-	assign empty=empty_r;
-	assign full=full_r;	
-	assign data_out=data_out_r;
-
+	
 	//Defines
 	reg [WIDTH-1:0] buffer [LENGTH-1:0];
 	reg [ADD:0] write_addr,read_addr;
-	reg empty_r,full_r;
-	reg [WIDTH-1:0] data_out_r;
 	
 	//Combinatorial Logic
 	always @(*) begin
-		if(write_addr==read_addr) empty_r=1;
-		else empty_r=0;
-		if((write_addr[ADD-1:0]==read_addr[ADD-1:0]) && (write_addr[ADD]!=read_addr[ADD])) full_r=1;
-		else full_r=0;	
+		if(write_addr==read_addr) empty=1;
+		else empty=0;
+		if((write_addr[ADD-1:0]==read_addr[ADD-1:0]) && (write_addr[ADD]!=read_addr[ADD])) full=1;
+		else full=0;	
 	end
 	
 	//Sequential Logic
@@ -197,7 +202,7 @@ module fifo_buff #(
 
 	always @(negedge clk) begin
 		if((~empty)&&(out_clk)) begin
-			data_out_r<=buffer[read_addr[ADD-1:0]];
+			data_out<=buffer[read_addr[ADD-1:0]];
 			read_addr<=read_addr+1;
 		end
 	end
@@ -228,9 +233,6 @@ module uart_rx #(
 	reg [MAX_ADD:0] bit_ctr_d, bit_ctr_q=0;
 	reg [WIDTH-1:0] data_d, data_q=0;
 
-	assign data_out=data_q;
-	assign new_data=new_data_q;
-
 	always @* begin
 	    state_d=state_q;
 	    new_data_d=new_data_q;
@@ -240,6 +242,8 @@ module uart_rx #(
 	    ctr_d=ctr_q;
 	    data_in_r_d=data_in;
 	    new_data_d=0;
+	    data_out=data_q;
+	    new_data= new_data_q;
 
 		case (state_q)
 			0: begin
