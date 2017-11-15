@@ -15,14 +15,14 @@
 #  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 PROJ = uart_hub
-
+DEPS = uart.v fifo.v
 PIN_DEF = pins.pcf
 DEVICE = lp8k
 
 all: $(PROJ).rpt $(PROJ).bin
 
 %.blif: %.v
-	yosys -p 'synth_ice40 -top $(PROJ) -blif $@' $< >yosys_out.txt
+	yosys -p 'synth_ice40 -top $(PROJ) -blif $@' $(PROJ).v $(DEPS) >yosys_out.txt
 
 %.asc: $(PIN_DEF) %.blif
 	arachne-pnr -d 8k -P cm81 -o $@ -p $^
