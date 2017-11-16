@@ -19,39 +19,39 @@
 module uart_tx #(
 	parameter CLOCK_FREQ=16000000, //Your FPGAs clock freq B2 boards = 16MHz
 	parameter BAUD=9600, //Default baudrate
-	parameter START_BITS=1,
-	parameter STOP_BITS=1,
-	parameter PARITY=0,
-	parameter WIDTH=8
+	parameter START_BITS=1, //Start bits(initial 0)
+	parameter STOP_BITS=1, //Stop bits (ending high)
+	parameter PARITY=0, //Parity, not yet implemented
+	parameter WIDTH=8 //Data width
 )(
-	input clk,
-	input new_data,
-	input [WIDTH-1:0] char,
-	output rdy,
-	output out_bit
+	input clk, //16MHz clock
+	input new_data, //New data strobe, must be high for at least one clk
+	input [WIDTH-1:0] char, //Input data to be sent
+	output rdy, //High when module is not busy
+	output out_bit //serial out
 );
-	localparam SIZE=WIDTH+START_BITS+STOP_BITS;
+	//Definitions
+	localparam SIZE=WIDTH+START_BITS+STOP_BITS; //Combined width with start,stop and parity
 	localparam MAX_ADDR=`CLOG2(SIZE)+1;
-	localparam DIV=CLOCK_FREQ/BAUD; //Divider constant, Need to flip twice per bit
+	localparam DIV=CLOCK_FREQ/BAUD; //Divider constant
 	localparam MAX_COUNT=`CLOG2(DIV)+1;
+
 	reg [MAX_COUNT:0] counter; //Clock divider
-
-
 	reg [SIZE-1:0] byte_d,byte_q=8'd0; //Byte output
 	reg [MAX_ADDR-1:0] shift_d,shift_q=0; //Shift counter
-	reg rdy_d,rdy_q=1;
-	reg [1:0] state_d,state_q=0;
+	reg rdy_d,rdy_q=1; 
+	reg [1:0] state_d,state_q=0; //FSM register
 
-	localparam READY=2'd0;
+	localparam READY=2'd0; 
 	localparam LOAD=2'd1;
 	localparam SHIFT=2'd2;
 
 	//Assignments
 	assign rdy=rdy_q;
 	assign out_bit=byte_q[0]|rdy;
+
 	//Combinatorial Logic
 	always @* begin
-
 		state_d=state_q;
 		shift_d=shift_q;
 		byte_d=byte_q;
@@ -88,11 +88,11 @@ module uart_tx #(
 		rdy_q<=rdy_d;
 		state_q<=state_d;
 		counter<=counter+1;
-		if(state_q==LOAD) begin
+		if(state_q==LOAD) begin //only do once per transmission
 		       	byte_q<=byte_d;
 			counter<=0;
 		end
-		if(counter>=DIV) begin
+		if(counter>=DIV) begin //Shift
 			counter<=0;
 			byte_q<=byte_d;
 			shift_q<=shift_d;
@@ -105,14 +105,14 @@ module uart_rx #(
 	parameter BAUD=9600, //Default baudrate
 	parameter START_BITS=1,
 	parameter STOP_BITS=1,
-	parameter PARITY=0,
-	parameter WIDTH=8
+	parameter PARITY=0, //TODO Not yet implemented
+	parameter WIDTH=8 //Data width
 
 )(
 	input clk,
-	input data_in,
+	input data_in, //Serial in
 	output [WIDTH-1:0] data_out,
-	output new_data
+	output new_data  //High for one full clock cycle when new data is available
 );
 	localparam CLK_PER_BIT=16000000/9600;
 	localparam HCLK_PER_BIT=CLK_PER_BIT/2;
@@ -120,7 +120,7 @@ module uart_rx #(
 	localparam MAX_ADD=`CLOG2(WIDTH);
 
 	reg new_data_d, new_data_q=0;
-	reg data_in_r_d, data_in_r_q=1;
+	reg data_in_r_d, data_in_r_q=1; //Must be one on start 
 	reg [1:0] state_d, state_q=0;
 	reg [MAX_COUNT:0] ctr_d, ctr_q=0;
 	reg [MAX_ADD:0] bit_ctr_d, bit_ctr_q=0;
