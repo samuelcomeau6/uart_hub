@@ -21,7 +21,7 @@ DEVICE = lp8k
 
 all: $(PROJ).rpt $(PROJ).bin
 
-%.blif: %.v
+%.blif: %.v $(DEPS)
 	yosys -p 'synth_ice40 -top $(PROJ) -blif $@' $(PROJ).v $(DEPS) >yosys_out.txt
 
 %.asc: $(PIN_DEF) %.blif

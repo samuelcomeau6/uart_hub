@@ -28,8 +28,7 @@ module uart_tx #(
 	input new_data,
 	input [WIDTH-1:0] char,
 	output rdy,
-	output out_bit,
-	output debug
+	output out_bit
 );
 	localparam SIZE=WIDTH+START_BITS+STOP_BITS;
 	localparam MAX_ADDR=`CLOG2(SIZE)+1;
@@ -38,10 +37,10 @@ module uart_tx #(
 	reg [MAX_COUNT:0] counter; //Clock divider
 
 
-	reg [SIZE-1:0] byte_d,byte_q; //Byte output
-	reg [MAX_ADDR:0] shift_d,shift_q; //Shift counter
+	reg [SIZE-1:0] byte_d,byte_q=8'd0; //Byte output
+	reg [MAX_ADDR-1:0] shift_d,shift_q=0; //Shift counter
 	reg rdy_d,rdy_q=1;
-	reg [1:0] state_q,state_d;
+	reg [1:0] state_d,state_q=0;
 
 	localparam READY=2'd0;
 	localparam LOAD=2'd1;
@@ -49,7 +48,6 @@ module uart_tx #(
 
 	//Assignments
 	assign rdy=rdy_q;
-	assign debug=state_q[0]; //FIXME Heisenbug. Don't alter this statement.
 	assign out_bit=byte_q[0]|rdy;
 	//Combinatorial Logic
 	always @* begin
@@ -76,7 +74,7 @@ module uart_tx #(
 			SHIFT: begin
 				shift_d=shift_q+1;
 				byte_d=byte_q>>1;
-				if(shift_q>=SIZE) state_d=READY;
+				if(shift_q>=SIZE-1) state_d=READY;
 				else state_d=SHIFT;
 			end
 			default:begin
@@ -121,14 +119,14 @@ module uart_rx #(
   	localparam MAX_COUNT=`CLOG2(CLK_PER_BIT);
 	localparam MAX_ADD=`CLOG2(WIDTH);
 
-	reg new_data_d, new_data_q=1;
-	reg data_in_r_d, data_in_r_q=0;
+	reg new_data_d, new_data_q=0;
+	reg data_in_r_d, data_in_r_q=1;
 	reg [1:0] state_d, state_q=0;
 	reg [MAX_COUNT:0] ctr_d, ctr_q=0;
 	reg [MAX_ADD:0] bit_ctr_d, bit_ctr_q=0;
-	reg [WIDTH-1:0] data_d, data_q=0;
+	reg [WIDTH:0] data_d, data_q;
 
-	assign data_out=data_q;
+	assign data_out=data_q[WIDTH-1:0];
 	assign new_data=new_data_q;
 	
 	always @* begin
@@ -158,10 +156,10 @@ module uart_rx #(
 			2: begin
 				ctr_d=ctr_q + 1;
 				if (ctr_q==CLK_PER_BIT) begin
-					data_d={data_in_r_q, data_q[1+6-:7]};
+					if(bit_ctr_q<8) data_d={data_in_r_q, data_q[7-:7]};
 					bit_ctr_d=bit_ctr_q + 1;
 					ctr_d=0;
-					if (bit_ctr_q==7) begin
+					if (bit_ctr_q==8) begin
 						state_d=3;
 						new_data_d=1;
 					end
